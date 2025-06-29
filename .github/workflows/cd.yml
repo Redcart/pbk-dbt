@@ -20,53 +20,10 @@ env:
   UV_VERSION: 0.7.8 # Version of uv to install
 
 jobs:
-
-  pre-commit:
-    environment: ${{ github.ref_name }}
-    runs-on: ubuntu-latest
-    # Add "id-token" with the intended permissions.
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-
-    steps:
-    - name: Checkout code repository
-      uses: actions/checkout@v4
-
-    - name: Install uv
-      uses: astral-sh/setup-uv@v6
-      with:
-        # Install a specific version of uv.
-        version: ${{ env.UV_VERSION }}
-
-    - name: Install dependencies
-      run:  make install
-
-    - name: pre-commit run
-      run: make pre-commit
-
-  tests:
-    environment: ${{ github.ref_name }}
-    runs-on: ubuntu-latest
-    # Add "id-token" with the intended permissions.
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-
-    needs: pre-commit
-
-    steps:
-    - name: Checkout code repository
-      uses: actions/checkout@v4
-
-    - name: Install uv
-      uses: astral-sh/setup-uv@v6
-      with:
-        # Install a specific version of uv.
-        version: ${{ env.UV_VERSION }}
-
-    - name: tests
-      run: make tests
+  ci:
+    uses: ./.github/workflows/reusable_wf.yml
+    with:
+      uv_version: ${{ env.UV_VERSION }}
 
   sql:
     environment: ${{ github.ref_name }}
@@ -76,7 +33,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
 
-    needs: [pre-commit, tests]
+    needs: ci
 
     steps:
     - name: Checkout code repository

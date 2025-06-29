@@ -7,63 +7,9 @@ on:
     - "dev"
 
 env:
-  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-  GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
-  GCP_REGION: ${{ vars.GCP_REGION }}
-  DATASET: ${{ vars.DATASET }}
-  SERVICE_ACCOUNT_RUNTIME: ${{ vars.SERVICE_ACCOUNT_RUNTIME }}
-  SERVICE_ACCOUNT_GH: ${{ vars.SERVICE_ACCOUNT_GH }}
-  WIF_POOL_ID: ${{ vars.WIF_POOL_ID }} # Workload Identity Federation Pool
-  WIF_POOL_PROVIDER: ${{ vars.WIF_POOL_PROVIDER }} # Workload Identity Federation Provider
-  PROJECT: ${{ vars.PROJECT }}
-  STREAM: ${{ vars.STREAM }}
   UV_VERSION: 0.7.8 # Version of uv to install
 
 jobs:
-
-  pre-commit:
-    environment: dev
-    runs-on: ubuntu-latest
-    # Add "id-token" with the intended permissions.
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-
-    steps:
-    - name: Checkout code repository
-      uses: actions/checkout@v4
-
-    - name: Install uv
-      uses: astral-sh/setup-uv@v6
-      with:
-        # Install a specific version of uv.
-        version: ${{ env.UV_VERSION }}
-
-    - name: Install dependencies
-      run:  make install
-
-    - name: pre-commit run
-      run: make pre-commit
-
-  tests:
-    environment: dev
-    runs-on: ubuntu-latest
-    # Add "id-token" with the intended permissions.
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-
-    needs: pre-commit
-
-    steps:
-    - name: Checkout code repository
-      uses: actions/checkout@v4
-
-    - name: Install uv
-      uses: astral-sh/setup-uv@v6
-      with:
-        # Install a specific version of uv.
-        version: ${{ env.UV_VERSION }}
-
-    - name: tests
-      run: make tests
+  uses: ./.github/workflows/reusable_wf.yml
+  with:
+      uv_version: ${{ env.UV_VERSION }}

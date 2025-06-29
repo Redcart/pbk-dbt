@@ -1,0 +1,57 @@
+name: CI
+
+on:
+    workflow_call:
+      inputs:
+        uv_version:
+          required: true
+          type: string
+
+jobs:
+
+  pre-commit:
+    environment: dev
+    runs-on: ubuntu-latest
+    # Add "id-token" with the intended permissions.
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+    - name: Checkout code repository
+      uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        # Install a specific version of uv.
+        version: ${{ inputs.uv_version }}
+
+    - name: Install dependencies
+      run:  make install
+
+    - name: pre-commit run
+      run: make pre-commit
+
+  tests:
+    environment: dev
+    runs-on: ubuntu-latest
+    # Add "id-token" with the intended permissions.
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    needs: pre-commit
+
+    steps:
+    - name: Checkout code repository
+      uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        # Install a specific version of uv.
+        version: ${{ inputs.uv_version }}
+
+    - name: tests
+      run: make tests
