@@ -39,7 +39,6 @@ jobs:
       id-token: 'write'
 
     needs: ci
-
     steps:
     - name: Checkout code repository
       uses: actions/checkout@v4
