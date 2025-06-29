@@ -7,7 +7,7 @@ OUTPUT_DATASET = os.getenv("OUTPUT_DATASET")
 OUTPUT_TABLE = os.getenv("OUTPUT_TABLE")
 
 
-def process():
+def process(requests):
     run_query(
         project_id=GCP_PROJECT_ID,
         input_dataset=INPUT_DATASET,
