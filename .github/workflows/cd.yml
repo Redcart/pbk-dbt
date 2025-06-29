@@ -20,7 +20,12 @@ env:
   UV_VERSION: 0.7.8 # Version of uv to install
 
 jobs:
+
   ci:
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
     uses: ./.github/workflows/reusable_wf.yml
     with:
       uv_version: 0.7.8
