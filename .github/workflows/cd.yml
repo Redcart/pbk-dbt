@@ -62,7 +62,7 @@ jobs:
         mkdir -p cloud_function_sql
         cp -r src/ cloud_function_sql/src
         cp main.py cloud_function_sql/
-        uv export --no-hashes --no-header --no-annotate --format requirements.txt
+        uv export --no-hashes --no-header --no-annotate --format requirements.txt > cloud_function_sql/requirements.txt
 
     - name: Deploy Cloud Function
       run: |
