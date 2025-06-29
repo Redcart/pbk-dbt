@@ -23,7 +23,7 @@ jobs:
   ci:
     uses: ./.github/workflows/reusable_wf.yml
     with:
-      uv_version: ${{ env.UV_VERSION }}
+      uv_version: 0.7.8
 
   sql:
     environment: ${{ github.ref_name }}
