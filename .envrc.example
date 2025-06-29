@@ -1,0 +1,11 @@
+# Google Cloud Project ID
+export GCP_PROJECT_ID=<your-gcp-project-id>
+
+# BigQuery Dataset Name
+export INPUT_DATASET=<input-bq-dataset>
+
+# BigQuery Dataset Name
+export OUTPUT_DATASET=<output-bq-dataset>
+
+# Output Table
+export OUTPUT_TABLE=<output-bq-table>

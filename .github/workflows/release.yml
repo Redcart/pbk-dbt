@@ -1,0 +1,120 @@
+name: 'Deploy production SQL modelization to Google Cloud Functions'
+
+on:
+    push:
+      tags: [ 'v*.*.*' ]
+
+env:
+  TAG: ${{ github.ref_name }} # The tag name, e.g., v1.0.0
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
+  GCP_REGION: ${{ vars.GCP_REGION }}
+  DATASET: ${{ vars.DATASET }}
+  SERVICE_ACCOUNT_RUNTIME: ${{ vars.SERVICE_ACCOUNT_RUNTIME }}
+  SERVICE_ACCOUNT_GH: ${{ vars.SERVICE_ACCOUNT_GH }}
+  WIF_POOL_ID: ${{ vars.WIF_POOL_ID }} # Workload Identity Federation Pool
+  WIF_POOL_PROVIDER: ${{ vars.WIF_POOL_PROVIDER }} # Workload Identity Federation Provider
+  PROJECT: ${{ vars.PROJECT }}
+  STREAM: ${{ vars.STREAM }}
+  UV_VERSION: 0.7.8 # Version of uv to install
+
+jobs:
+
+  pre-commit:
+    environment: prd
+    runs-on: ubuntu-latest
+    # Add "id-token" with the intended permissions.
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+    - name: Checkout code repository
+      uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        # Install a specific version of uv.
+        version: ${{ env.UV_VERSION }}
+
+    - name: Install dependencies
+      run:  make install
+
+    - name: pre-commit run
+      run: make pre-commit
+
+  tests:
+    environment: prd
+    runs-on: ubuntu-latest
+    # Add "id-token" with the intended permissions.
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    needs: pre-commit
+
+    steps:
+    - name: Checkout code repository
+      uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        # Install a specific version of uv.
+        version: ${{ env.UV_VERSION }}
+
+    - name: tests
+      run: make tests
+
+  sql:
+    environment: prd
+    runs-on: ubuntu-latest
+    # Add "id-token" with the intended permissions.
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    needs: [pre-commit, tests]
+
+    steps:
+    - name: Checkout code repository
+      uses: actions/checkout@v4
+
+    - name: Authentication to Google Cloud Platform
+      uses: google-github-actions/auth@v2
+      with:
+        token_format: access_token
+        workload_identity_provider: 'projects/${{ env.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ env.WIF_POOL_ID }}/providers/${{ env.WIF_POOL_PROVIDER }}'
+        service_account: ${{ env.SERVICE_ACCOUNT_GH }}
+        access_token_lifetime: 300s
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        # Install a specific version of uv.
+        version: ${{ env.UV_VERSION }}
+
+    - name: Copy source code to Cloud Function directory
+      run: |
+        mkdir -p cloud_function_sql
+        cp -r src/ cloud_function_sql/src
+        cp main.py cloud_function_sql/
+        uv export --no-hashes --no-header --no-annotate --format requirements.txt
+
+    - name: Deploy Cloud Function
+      run: |
+        gcloud functions deploy ${{ env.PROJECT }}-${{ env.STREAM }} \
+        --gen2 \
+        --region=${{ env.GCP_REGION }} \
+        --runtime=python313 \
+        --memory=1G \
+        --source=cloud_function_sql \
+        --trigger-http \
+        --entry-point=process \
+        --no-allow-unauthenticated \
+        --ingress-settings=internal-only \
+        --run-service-account=${{ env.SERVICE_ACCOUNT_RUNTIME }} \
+        --build-service-account=projects/${{ env.GCP_PROJECT_ID }}/serviceAccounts/${{ env.SERVICE_ACCOUNT_GH }} \
+        --set-env-vars GCP_PROJECT_ID=${{ env.GCP_PROJECT_ID }} \
+        --set-env-vars DATASET=${{ env.DATASET }}
