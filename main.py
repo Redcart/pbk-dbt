@@ -1,5 +1,5 @@
 import os
-from utils import run_query
+from src.utils import run_query
 
 GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID")
 INPUT_DATASET = os.getenv("INPUT_DATASET")
