@@ -52,7 +52,7 @@ available_electric_bikes AS (
     ingestion_time,
     vehicle_type_id,
     COUNT(*) AS nb_bikes_available_electric
-  FROM `{{ project_id }}.{{ dataset }}.capacity`
+  FROM `{{ project_id }}.{{ dataset }}.{{ table_capacity }}`
   WHERE vehicle_type_id = "2"
   GROUP BY station_id, vehicle_type_id, ingestion_time
 
