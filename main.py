@@ -13,7 +13,7 @@ def process(requests):
         input_dataset=INPUT_DATASET,
         output_dataset=OUTPUT_DATASET,
         output_table=OUTPUT_TABLE,
-        sql_file="query.sql",
+        sql_file="src/query.sql",
     )
 
     return "200"
