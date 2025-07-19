@@ -8,6 +8,12 @@ OUTPUT_TABLE = os.getenv("OUTPUT_TABLE")
 
 
 def process(requests):
+    """Processes the incoming request to run a BigQuery SQL query.
+    Args:
+        requests: The incoming request object.
+    Returns:
+        str: Status code indicating the result of the operation.
+    """
     run_query(
         project_id=GCP_PROJECT_ID,
         input_dataset=INPUT_DATASET,
