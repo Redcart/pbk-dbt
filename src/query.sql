@@ -15,7 +15,11 @@ list_timestamp AS (
   FROM
     UNNEST(
       GENERATE_TIMESTAMP_ARRAY(
-        TIMESTAMP_SUB(TIMESTAMP_TRUNC(CURRENT_TIMESTAMP(), HOUR), INTERVAL 55 MINUTE),
+        {% if start_date is not none %} -- Example: 2025-06-12 23:00:00 UTC
+          TIMESTAMP('{{ start_date }}')
+        {% else %}
+          TIMESTAMP_SUB(TIMESTAMP_TRUNC(CURRENT_TIMESTAMP(), HOUR), INTERVAL 55 MINUTE)
+        {% endif %},
         TIMESTAMP_TRUNC(CURRENT_TIMESTAMP(), HOUR),
       INTERVAL 5 MINUTE)
     ) AS ingestion_time

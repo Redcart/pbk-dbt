@@ -4,7 +4,11 @@ from jinja2 import Template
 
 
 def get_context(
-    project_id: str, dataset: str, table_stations: str, table_capacity: str
+    project_id: str,
+    dataset: str,
+    table_stations: str,
+    table_capacity: str,
+    start_date: str,
 ) -> dict:
     """
     Retrieves the context for Jinja template rendering.
@@ -17,6 +21,7 @@ def get_context(
         "dataset": dataset,
         "table_stations": table_stations,
         "table_capacity": table_capacity,
+        "start_date": start_date,
     }
 
 
@@ -26,6 +31,7 @@ def run_query(
     output_dataset: str,
     output_table: str,
     sql_file: str,
+    start_date: str = None,
 ) -> str:
     """
     Executes a BigQuery SQL query after parsing it with Jinja.
@@ -50,6 +56,7 @@ def run_query(
         dataset=input_dataset,
         table_stations="stations",
         table_capacity="capacity",
+        start_date=start_date,
     )
     template = Template(sql_template)
     sql_query = template.render(context)
