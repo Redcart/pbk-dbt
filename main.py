@@ -17,8 +17,3 @@ def process(requests):
     )
 
     return "200"
-
-
-if __name__ == "__main__":
-    status = process()
-    print(f"Process completed with status: {status}")
