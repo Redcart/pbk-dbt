@@ -62,6 +62,7 @@ def run_query(
     sql_query = template.render(context)
 
     logging.info(f"Executing query: {sql_query}")
+    print(f"Executing query: {sql_query}")
 
     table_id = f"{project_id}.{output_dataset}.{output_table}"
 
