@@ -82,5 +82,4 @@ jobs:
         --build-service-account=projects/${{ env.GCP_PROJECT_ID }}/serviceAccounts/${{ env.SERVICE_ACCOUNT_GH }} \
         --set-env-vars GCP_PROJECT_ID=${{ env.GCP_PROJECT_ID }} \
         --set-env-vars INPUT_DATASET=${{ env.INPUT_DATASET }} \
-        --set-env-vars OUTPUT_DATASET=${{ env.OUTPUT_DATASET }} \
-        --set-env-vars OUTPUT_TABLE=${{ env.OUTPUT_TABLE }}
+        --set-env-vars OUTPUT_DATASET=${{ env.OUTPUT_DATASET }}
