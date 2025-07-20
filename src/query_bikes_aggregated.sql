@@ -5,4 +5,3 @@ SELECT
   ingestion_time
 FROM  `{{ project_id }}.{{ intermediate_dataset }}.{{ table_capacity_over_time }}`
 GROUP BY ingestion_time
-ORDER BY ingestion_time
