@@ -8,6 +8,7 @@ def get_context(
     dataset: str,
     table_stations: str,
     table_capacity: str,
+    table_capacity_over_time: str,
     start_date: str,
 ) -> dict:
     """
@@ -21,6 +22,7 @@ def get_context(
         "dataset": dataset,
         "table_stations": table_stations,
         "table_capacity": table_capacity,
+        "table_capacity_over_time": table_capacity,
         "start_date": start_date,
     }
 
@@ -56,13 +58,13 @@ def run_query(
         dataset=input_dataset,
         table_stations="stations",
         table_capacity="capacity",
+        table_capacity_over_time="stations_capacity_over_time",
         start_date=start_date,
     )
     template = Template(sql_template)
     sql_query = template.render(context)
 
     logging.info(f"Executing query: {sql_query}")
-    print(f"Executing query: {sql_query}")
 
     table_id = f"{project_id}.{output_dataset}.{output_table}"
 
