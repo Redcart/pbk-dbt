@@ -5,7 +5,8 @@ from jinja2 import Template
 
 def get_context(
     project_id: str,
-    dataset: str,
+    input_dataset: str,
+    intermediate_dataset: str,
     table_stations: str,
     table_capacity: str,
     table_capacity_over_time: str,
@@ -19,10 +20,11 @@ def get_context(
     """
     return {
         "project_id": project_id,
-        "dataset": dataset,
+        "input_dataset": input_dataset,
+        "intermediate_dataset": intermediate_dataset,
         "table_stations": table_stations,
         "table_capacity": table_capacity,
-        "table_capacity_over_time": table_capacity,
+        "table_capacity_over_time": table_capacity_over_time,
         "start_date": start_date,
     }
 
@@ -55,7 +57,8 @@ def run_query(
     # Render the SQL template with the provided context
     context = get_context(
         project_id=project_id,
-        dataset=input_dataset,
+        input_dataset=input_dataset,
+        intermediate_dataset=output_dataset,
         table_stations="stations",
         table_capacity="capacity",
         table_capacity_over_time="stations_capacity_over_time",
