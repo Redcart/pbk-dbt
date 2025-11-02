@@ -1,0 +1,9 @@
+models:
+  - name: stg_api_publibike__stations
+    config:
+      materialized: view
+    description: "Staging table for Publibike stations data from API"
+  - name: stg_api_publibike__capacity
+    config:
+      materialized: view
+    description: "Staging table for Publibike capacity data from API"

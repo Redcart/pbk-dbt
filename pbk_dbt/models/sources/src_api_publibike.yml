@@ -1,0 +1,29 @@
+sources:
+  - name: src_api_pbk
+    database: symmetric-card-476908-f2
+    schema: api_pbk_data
+    tables:
+      - name: stations
+        columns:
+          - name: station_id
+          - name: latitude
+          - name: longitude
+          - name: state_id
+          - name: state_name
+          - name: name
+          - name: address
+          - name: zip
+          - name: city
+          - name: network_id
+          - name: network_name
+          - name: is_virtual_station
+          - name: ingestion_time
+      - name: capacity
+        columns:
+          - name: station_id
+          - name: vehicle_id
+          - name: vehicle_name
+          - name: vehicle_ebike_battery_level
+          - name: vehicle_type_id
+          - name: vehicle_type_name
+          - name: ingestion_time

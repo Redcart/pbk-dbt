@@ -1,0 +1,33 @@
+pbk_dbt:
+  target: stg
+  outputs:
+    dev:
+      dataset: pbk_transformed_data
+      job_execution_timeout_seconds: 600
+      job_retries: 1
+      location: EU
+      method: oauth
+      priority: interactive
+      project: symmetric-card-476908-f2
+      threads: 8
+      type: bigquery
+    stg:
+      dataset: pbk_transformed_data
+      job_execution_timeout_seconds: 600
+      job_retries: 1
+      location: EU
+      method: oauth
+      priority: interactive
+      project: dynamic-density-476908-f5
+      threads: 8
+      type: bigquery
+    prd:
+      dataset: pbk_transformed_data
+      job_execution_timeout_seconds: 600
+      job_retries: 1
+      location: EU
+      method: oauth
+      priority: interactive
+      project: valiant-store-476908-q6
+      threads: 8
+      type: bigquery

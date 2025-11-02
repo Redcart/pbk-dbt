@@ -1,0 +1,47 @@
+models:
+  - name: bikes_over_time
+    config:
+      materialized: table
+    description: This table shows the number of available bikes over time for each station
+    columns:
+      - name: station_id
+        description: The unique identifier for each bike station
+        data_tests:
+          - not_null
+      - name: ingestion_time
+        description: The timestamp when the data was ingested
+        data_tests:
+          - not_null
+      - name: nb_bikes_available_mechanic
+        description: The number of available mechanical bikes at the station at the given time
+      - name: nb_bikes_available_electric
+        description: The number of available electric bikes at the station at the given time
+      - name: nb_bikes_available
+        description: The total number of available bikes (mechanical + electric) at the station at the given time
+    tags:
+      - pbk_transformed_data
+    meta:
+      owner: data_team
+      business_unit: publibike
+
+  - name: bikes_aggregated
+    config:
+      materialized: table
+    description: This table contains the aggregated capacity through time
+    columns:
+      - name: sum_nb_bikes_available_mechanic
+        description: The total number of available mechanical bikes across all stations at the given time
+      - name: sum_nb_bikes_available_electric
+        description: The total number of available electric bikes across all stations at the given time
+      - name: sum_nb_bikes_available
+        description: The total number of available bikes (mechanical + electric) across all stations at
+          the given time
+      - name: ingestion_time
+        description: The timestamp when the data was ingested
+        data_tests:
+          - not_null
+    tags:
+      - pbk_transformed_data
+    meta:
+      owner: data_team
+      business_unit: publibike
