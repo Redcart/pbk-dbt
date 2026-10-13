@@ -1,0 +1,16 @@
+pbk:
+  target: dev
+  outputs:
+    dev: &bigquery
+      type: bigquery
+      method: oauth
+      project: "{{ env_var('GCP_PROJECT_ID') }}"
+      dataset: silver
+      location: EU
+      threads: 8
+      impersonate_service_account: "{{ env_var('DBT_IMPERSONATE_SERVICE_ACCOUNT', '') or none }}"
+      priority: interactive
+      job_retries: 1
+      job_execution_timeout_seconds: 600
+    stg: *bigquery
+    prd: *bigquery

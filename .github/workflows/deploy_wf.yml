@@ -1,0 +1,97 @@
+name: Deploy
+
+# Cloud Run Job + one Cloud Scheduler per scheduled job of data_product.yml.
+# dev builds the image; stg and prd deploy the image dev built for the same commit SHA.
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      build:
+        required: true
+        type: boolean
+      image_tag:
+        description: 'Extra tag added to the image (release version)'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  deploy:
+    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    env:
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      WIF_POOL_ID: ${{ vars.WIF_POOL_ID }}
+      WIF_POOL_PROVIDER: ${{ vars.WIF_POOL_PROVIDER }}
+      PROJECT: ${{ vars.PROJECT }}
+      STREAM: ${{ vars.STREAM }}
+      IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GAR_PROJECT_ID }}/${{ vars.PROJECT }}-${{ vars.STREAM }}/${{ vars.PROJECT }}-${{ vars.STREAM }}
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
+      SERVICE_ACCOUNT_GH: ${{ vars.SERVICE_ACCOUNT_GH }}
+      SERVICE_ACCOUNT_RUNTIME: ${{ vars.SERVICE_ACCOUNT_RUNTIME }}
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - uses: google-github-actions/auth@v3
+      with:
+        token_format: access_token
+        workload_identity_provider: 'projects/${{ env.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ env.WIF_POOL_ID }}/providers/${{ env.WIF_POOL_PROVIDER }}'
+        service_account: ${{ env.SERVICE_ACCOUNT_GH }}
+        access_token_lifetime: 300s
+
+    - uses: google-github-actions/setup-gcloud@v3
+
+    - uses: astral-sh/setup-uv@v10.3.0
+      with:
+        version: ${{ vars.UV_VERSION }}
+
+    - name: Configure Docker for Artifact Registry
+      run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+
+    - name: Build and push
+      if: inputs.build
+      run: |
+        docker build -t ${{ env.IMAGE }}:${{ github.sha }} .
+        docker push ${{ env.IMAGE }}:${{ github.sha }}
+
+    # Never rebuild outside dev: the commit must already have an image
+    - name: Check image
+      if: ${{ !inputs.build }}
+      run: gcloud artifacts docker images describe ${{ env.IMAGE }}:${{ github.sha }}
+
+    - name: Tag release
+      if: inputs.image_tag != ''
+      run: gcloud artifacts docker tags add ${{ env.IMAGE }}:${{ github.sha }} ${{ env.IMAGE }}:${{ inputs.image_tag }}
+
+    - name: Deploy Cloud Run Job
+      run: |
+        gcloud run jobs deploy ${{ env.PROJECT }}-${{ env.STREAM }} \
+          --image ${{ env.IMAGE }}:${{ github.sha }} \
+          --region ${{ env.GCP_REGION }} \
+          --memory 1Gi --cpu 1 \
+          --task-timeout 600s --max-retries 0 \
+          --service-account ${{ env.SERVICE_ACCOUNT_RUNTIME }} \
+          --set-env-vars GCP_PROJECT_ID=${{ env.GCP_PROJECT_ID }}
+
+    - name: Deploy Cloud Schedulers
+      run: |
+        JOB=${{ env.PROJECT }}-${{ env.STREAM }}
+        uv run --no-dev python runner.py schedules | while IFS=$'\t' read -r NAME CRON; do
+          SCHEDULER=$JOB-$(echo "$NAME" | tr '_' '-')
+          ACTION=$(gcloud scheduler jobs describe $SCHEDULER --location ${{ env.GCP_REGION }} >/dev/null 2>&1 && echo update || echo create)
+          gcloud scheduler jobs $ACTION http $SCHEDULER \
+            --location ${{ env.GCP_REGION }} \
+            --schedule "$CRON" --time-zone "Etc/UTC" \
+            --uri "https://run.googleapis.com/v2/projects/${{ env.GCP_PROJECT_ID }}/locations/${{ env.GCP_REGION }}/jobs/$JOB:run" \
+            --http-method POST \
+            --headers "Content-Type=application/json" \
+            --message-body "{\"overrides\":{\"containerOverrides\":[{\"args\":[\"$NAME\"]}]}}" \
+            --oauth-service-account-email ${{ env.SERVICE_ACCOUNT_RUNTIME }}
+        done

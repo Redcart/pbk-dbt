@@ -1,0 +1,8 @@
+.venv
+.git
+.github
+archive
+target
+logs
+.envrc
+**/__pycache__

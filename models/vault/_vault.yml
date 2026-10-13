@@ -1,0 +1,45 @@
+version: 2
+
+models:
+  - name: hub_stations
+    columns:
+      - name: station_hk
+        data_tests: [unique, not_null]
+  - name: hub_bikes
+    columns:
+      - name: bike_hk
+        data_tests: [unique, not_null]
+  - name: lnk_station_bike
+    columns:
+      - name: station_bike_hk
+        data_tests: [unique, not_null]
+      - name: station_hk
+        data_tests:
+          - relationships: { arguments: { to: ref('hub_stations'), field: station_hk } }
+      - name: bike_hk
+        data_tests:
+          - relationships: { arguments: { to: ref('hub_bikes'), field: bike_hk } }
+  - name: sat_stations
+    columns:
+      - name: station_hk
+        data_tests:
+          - not_null
+          - relationships: { arguments: { to: ref('hub_stations'), field: station_hk } }
+      - name: status
+        data_tests:
+          - accepted_values: { arguments: { values: [active, closed] } }
+  - name: sat_bikes
+    columns:
+      - name: bike_hk
+        data_tests:
+          - not_null
+          - relationships: { arguments: { to: ref('hub_bikes'), field: bike_hk } }
+  - name: sat_station_bike_eff
+    columns:
+      - name: station_bike_hk
+        data_tests:
+          - not_null
+          - relationships: { arguments: { to: ref('lnk_station_bike'), field: station_bike_hk } }
+      - name: status
+        data_tests:
+          - accepted_values: { arguments: { values: [active, closed] } }

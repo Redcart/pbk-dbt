@@ -21,3 +21,11 @@ install:
 	@echo "Installing dependencies..."
 	@uv sync --dev
 	@echo "Dependencies installed."
+
+.PHONY: dbt-build
+dbt-build:
+	@uv run dbt build --profiles-dir .
+
+.PHONY: dbt-parse
+dbt-parse:
+	@GCP_PROJECT_ID=$${GCP_PROJECT_ID:-parse-only} uv run dbt parse --profiles-dir .

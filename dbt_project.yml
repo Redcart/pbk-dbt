@@ -1,0 +1,17 @@
+name: pbk
+version: '1.0.0'
+profile: pbk
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+
+clean-targets:
+  - target
+  - dbt_packages
+
+models:
+  pbk:
+    staging: { +schema: silver, +materialized: view }
+    vault:   { +schema: silver, +materialized: table }
+    marts:   { +schema: gold,   +materialized: table }

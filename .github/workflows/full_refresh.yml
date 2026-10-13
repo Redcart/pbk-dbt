@@ -1,0 +1,59 @@
+name: 'dbt full refresh'
+
+# Rebuild silver and gold from bronze (see "Full Refresh" in dbt.md)
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        type: choice
+        options: [dev, stg, prd]
+        required: true
+      select:
+        description: 'Optional dbt selector (e.g. stg_stations+). Empty = everything'
+        type: string
+        required: false
+        default: ''
+
+concurrency:
+  group: full-refresh-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  full_refresh:
+    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      SERVICE_ACCOUNT_GH: ${{ vars.SERVICE_ACCOUNT_GH }}
+      WIF_POOL_ID: ${{ vars.WIF_POOL_ID }}
+      WIF_POOL_PROVIDER: ${{ vars.WIF_POOL_PROVIDER }}
+      JOB: ${{ vars.PROJECT }}-${{ vars.STREAM }}
+
+    steps:
+    - uses: google-github-actions/auth@v3
+      with:
+        workload_identity_provider: 'projects/${{ env.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ env.WIF_POOL_ID }}/providers/${{ env.WIF_POOL_PROVIDER }}'
+        service_account: ${{ env.SERVICE_ACCOUNT_GH }}
+
+    - uses: google-github-actions/setup-gcloud@v3
+
+    - name: Execute Cloud Run Job
+      env:
+        SELECT: ${{ inputs.select }}
+      run: |
+        ARGS="full_refresh"
+        if [ -n "$SELECT" ]; then
+          ARGS="$ARGS,--select,$SELECT"
+        fi
+
+        gcloud run jobs execute "$JOB" \
+          --project="$GCP_PROJECT_ID" \
+          --region="$GCP_REGION" \
+          --args="$ARGS" \
+          --wait

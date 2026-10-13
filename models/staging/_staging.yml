@@ -1,0 +1,20 @@
+version: 2
+
+models:
+  - name: stg_stations
+    description: One row per station per snapshot.
+    columns:
+      - name: snapshot_id
+        data_tests: [not_null]
+      - name: station_id
+        data_tests: [not_null]
+
+  - name: stg_station_bikes
+    description: One row per bike present at a station per snapshot.
+    columns:
+      - name: snapshot_id
+        data_tests: [not_null]
+      - name: station_id
+        data_tests: [not_null]
+      - name: bike_id
+        data_tests: [not_null]

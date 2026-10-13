@@ -1,11 +1,4 @@
-# Google Cloud Project ID
+# Target environment project (dev: see pbk-variables)
 export GCP_PROJECT_ID=<your-gcp-project-id>
-
-# BigQuery Dataset Name
-export INPUT_DATASET=<input-bq-dataset>
-
-# BigQuery Dataset Name
-export OUTPUT_DATASET=<output-bq-dataset>
-
-# Output Table
-export OUTPUT_TABLE=<output-bq-table>
+# Dev only: run dbt as the runtime SA (no key, needs serviceAccountTokenCreator)
+export DBT_IMPERSONATE_SERVICE_ACCOUNT=pbk-dbt@<your-gcp-project-id>.iam.gserviceaccount.com
