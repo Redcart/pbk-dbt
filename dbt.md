@@ -4,6 +4,40 @@
 
 ---
 
+## Implementation Status (dev)
+
+| Area | State |
+|---|---|
+| Bronze → silver staging | Done: `stg_snapshots`, `stg_stations`, `stg_station_bikes` (views in `silver`), source freshness on `bronze.publibike_snapshots` |
+| Data Vault | Done: `hub_stations`, `hub_bikes`, `lnk_station_bike`, `sat_stations`, `sat_bikes`, `sat_station_bike_eff`, all incremental, with tests |
+| Gold | Not started (`dim_*`, `fct_station_capacity`, `fct_trips`) |
+| Runner | `runner.py` + `data_product.yml` (jobs `silver`, `full_refresh`), Docker image |
+| CI/CD | GitHub Actions: PR checks, CD (dev/stg), release (prd), manual full refresh |
+| ML, monitoring, Lightdash | Not started |
+
+`archive/` holds the previous implementation (Cloud Function style, SQL run from Python); it is excluded from lint and pre-commit and kept for reference only.
+
+---
+
+## Local Development
+
+The dbt project sits at the repository root (`dbt_project.yml`, `profiles.yml`, `models/`, `macros/`).
+
+```bash
+make install                              # uv sync --dev
+source .envrc                             # see .envrc.example
+uv run dbt build --profiles-dir .
+uv run dbt source freshness --profiles-dir .
+make dbt-parse                            # static check, no BigQuery (what CI runs)
+```
+
+- **`GCP_PROJECT_ID`** — the project of the target environment (`pbk-dev-bda8` for dev); the only thing that changes between targets, since dataset names are the same everywhere.
+- **`DBT_IMPERSONATE_SERVICE_ACCOUNT`** — dev only: `pbk-dbt@<project>.iam.gserviceaccount.com`. The daily user cannot run BigQuery jobs, so dbt acts as the runtime SA (`impersonate_service_account` in `profiles.yml`, no key; needs `serviceAccountTokenCreator`, see `dev-environment.md`). Unset in Cloud Run, where the runtime SA is the identity.
+- **Python 3.14** — `mashumaro` is pinned `>=3.17` in `pyproject.toml`: the 3.14 release dbt resolves by default fails on import under Python 3.14. Drop the pin once dbt-common requires a newer version.
+- **Auth method** — `oauth` (Application Default Credentials) for every target; the three targets (`dev`, `stg`, `prd`) are identical.
+
+---
+
 ## What This Repository Is NOT
 
 - Infrastructure provisioning (Terraform) — handled by pbk-infra
@@ -85,9 +119,48 @@ pbk-ml     → forecasts, ml_model_runs ┘
 
 The dbt project is packaged as a Docker image, pushed to Artifact Registry via GitHub Actions, and run as a Cloud Run Job.
 
-**Python 3.14** (platform standard) with **dbt-core 1.12+** — the first dbt-core line that supports 3.14 (`>=1.12,<1.13`). dbt-bigquery 1.12.1 (2026-09-15) only declares up to Python 3.13 in its classifiers, though it installs on `>=3.10`: run the test suite on 3.14 first, and if dbt-bigquery or one of its dependencies breaks, pin this repository alone to 3.13 (`requires-python = ">=3.13,<3.14"`, 3.13 base image) until the adapter declares 3.14. The runner is its own image, so nothing else is affected.
+**Python 3.14** (platform standard) with **dbt-core 1.12** (`>=1.12,<1.13`) and dbt-bigquery 1.12. Validated on 3.14 (dbt runs, tests pass); the only fix needed is the `mashumaro` pin described in *Local Development*.
 
-Orchestration works via Cloud Scheduler: multiple schedulers trigger the same Cloud Run Job with a small, schedule-specific body. A `data_product.yml` file (see `data_product.yml` for an example format) declares the different runs the job can perform, so a single job image serves every schedule.
+Orchestration works via Cloud Scheduler: **one scheduler per scheduled job** (each job has its own cron, and a scheduler has only one), all triggering the same Cloud Run Job `pbk-dbt`. `data_product.yml` declares the runs the image can perform, so a single image serves every schedule.
+
+```yaml
+# data_product.yml
+name: publibike
+jobs:
+  - name: silver              # every 5 minutes
+    schedule: "*/5 * * * *"
+    command: build
+    args: ["--select", "vault"]
+  - name: full_refresh        # manual only
+    schedule: null
+    command: build
+    args: ["--full-refresh"]
+```
+
+- **`runner.py`** is the image entry point (`ENTRYPOINT ["python", "runner.py"]`). The container args are the job name plus optional extra dbt args: `python runner.py <job> [extra args]` runs `dbt --log-format json <command> <args> <extra args>`, and returns dbt's exit code, so a failed model or test fails the Cloud Run execution. `python runner.py schedules` prints `<job>\t<cron>` for every scheduled job (used by the deploy workflow).
+- **Scheduler → job** — each scheduler POSTs to the Cloud Run `jobs/pbk-dbt:run` API with the body `{"overrides":{"containerOverrides":[{"args":["<job>"]}]}}`, authenticated as the runtime SA. Scheduler names are `pbk-dbt-<job>` (underscores replaced by hyphens). With several data products the names must include the product (`pbk-dbt-<product>-<job>`) and the runner must take a product: not needed while there is a single `data_product.yml`.
+- **Image** — `python:3.14-slim` + pinned uv, dependencies from `uv.lock`, then the dbt project and `runner.py`. Configuration comes from the `GCP_PROJECT_ID` environment variable only.
+- **Cloud Run Job settings** — 1 GiB, 1 CPU, 600 s task timeout, no retries (the next 5-minute run is the retry).
+
+### CI/CD (GitHub Actions)
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| `pull_request_checks.yml` | PR to `dev`/`stg`/`prd` | CI |
+| `cd.yml` | push to `dev`, `stg` | CI → image → deploy |
+| `release.yml` | tag `v*.*.*` | CI → image check + version tag → deploy to `prd` |
+| `full_refresh.yml` | manual | executes the Cloud Run Job with `full_refresh` |
+| `reusable_wf.yml` | called | CI: pre-commit, pytest, `dbt parse` (no GCP credentials) |
+| `deploy_wf.yml` | called | `image` → (`deploy-job` ‖ `deploy-schedulers`) |
+
+```
+ci ──► image ──┬──► deploy-job          (gcloud run jobs deploy)
+               └──► deploy-schedulers   (create/update one scheduler per scheduled job)
+```
+
+- **`image`** — `dev` builds and pushes `<GAR>/pbk-dbt/pbk-dbt:<sha>`; `stg`/`prd` only check that the image of the same SHA exists (never rebuild); a release also adds the version tag.
+- **`dbt parse`** — catches Jinja/YAML errors, broken `ref`/`source`, config typos without BigQuery. It does not run the SQL: column or JSON-path mistakes only surface in `dbt build` on dev.
+- **Permissions needed** (provisioned by pbk-infra): `pbk-dbt-gh` — Artifact Registry writer on the `pbk-dbt` repository, `roles/run.developer`, `roles/iam.serviceAccountUser` on the runtime SA, `roles/cloudscheduler.admin`; runtime SA `pbk-dbt` — `roles/run.developer` on the job (so schedulers can start it with an args override), BigQuery job user on the project, viewer on `bronze`, editor on `silver` and `gold`.
 
 ---
 
@@ -138,6 +211,14 @@ Modeling PubliBike (velospot) data:
 All entities are materialized as tables. Hubs need no partitioning nor clustering. Satellites are partitioned by time (and likely clustered).
 
 **Station example:** `hub_stations` records every station that has ever existed. `sat_stations` captures descriptive, time-varying details (max capacity, address) and station status (`active`/`closed`) — a station missing from the feed is marked `closed`; if it reappears (e.g. after maintenance), it's marked `active` again. This drives `dim_stations` in gold: the current network of active stations.
+
+**As implemented:**
+- **Keys** — hash key = `md5` of the business key(s) joined by `|` (`hash_key` macro); `hashdiff` = `md5` of the JSON of the descriptive columns plus `status` (`hashdiff` macro).
+- **Hubs and link** — incremental `merge` on the hash key (BigQuery has no `append` strategy); only keys not yet in the table are selected, so the merge only inserts. Columns: hash key(s), business key(s), `first_seen_at`, `ingested_at`, `record_source`.
+- **`sat_stations`** — descriptive attributes (number, name, address, latitude, longitude, details route) and `status`. Bike counts change every snapshot and belong to `fct_station_capacity`, not to this satellite.
+- **`sat_bikes`** — `bike_range` over time. No status: a bike absent from the feed is simply rented, not closed.
+- **`sat_station_bike_eff`** — effectivity of the link: `active` when a bike shows up at a station, `closed` when it is gone from that station in the next snapshot. Basis for `fct_trips`.
+- **Closed detection** — a station (or station-bike pair) present in a snapshot but absent from the next one gets a `closed` row stamped with the next snapshot's time; a reappearance is a new `active` row. Snapshot order comes from `stg_snapshots`, which reads only the metadata columns, never the payload.
 
 **Station feed → satellite insert logic:**
 ```
@@ -190,11 +271,11 @@ Satellites and fact tables grow with every snapshot, so they use `incremental` m
 
 | Table | Materialization | Partition | Cluster by |
 |---|---|---|---|
-| `hub_stations`, `hub_bikes` | table | — | — |
-| `sat_stations` | incremental | `DATE(loaded_at)` | `station_id` |
-| `sat_bikes` | incremental | `DATE(loaded_at)` | `bike_id` |
-| `sat_station_bike_eff` | incremental | `DATE(loaded_at)` | `station_id` |
-| `fct_station_capacity` | incremental | `DATE(observed_at)` | `station_id` |
+| `hub_stations`, `hub_bikes`, `lnk_station_bike` | incremental (insert-only merge) | — | — |
+| `sat_stations` | incremental | `DATE(observed_at)` | `station_hk` |
+| `sat_bikes` | incremental | `DATE(observed_at)` | `bike_hk` |
+| `sat_station_bike_eff` | incremental | `DATE(observed_at)` | `station_hk` |
+| `fct_station_capacity` | incremental | `DATE(observed_at)` | `station_hk` |
 | `fct_trips` | incremental | `DATE(started_at)` | `station_id`, `bike_id` |
 
 **Why:**
@@ -259,13 +340,15 @@ where hashdiff is distinct from coalesce(prev_hashdiff{% if is_incremental() %},
 - **Watermark-based** (`max(loaded_at)` from the target) — no run state stored anywhere else, so a rebuilt table is immediately a valid starting point for the next scheduled run.
 - **`on_schema_change='fail'`** — adding a column to a satellite changes its `hashdiff` and would leave history `NULL` with `append_new_columns`. Failing forces the explicit decision: run a full refresh.
 
-> **Open decision — time columns.** `loaded_at` above is a placeholder, to be decided when implementing. Bronze has `observed_at` (when the snapshot was taken) and `ingested_at` (when it landed in BigQuery).
->
-> **Current leaning:** keep both on satellites, each with one job:
+> **Decision — time columns.** Satellites keep both bronze timestamps, each with one job:
 > - **`ingested_at` → incremental watermark.** With `observed_at`, a late snapshot is lost: 12:30 is delayed by a Pub/Sub retry and loads after 12:35, the watermark is already 12:35, so 12:30 is skipped forever. `ingested_at` only moves forward.
-> - **`observed_at` → change-detection ordering and partitioning.** A change is defined by the order snapshots were taken, not loaded; dashboards and forecasting filter on business time, so partition pruning must use it.
+> - **`observed_at` → change-detection ordering and partitioning.** A change is defined by the order snapshots were taken, not loaded; dashboards and forecasting filter on business time, so partition pruning uses it.
 >
-> **Trade-off accepted:** a late snapshot is compared against the latest satellite row, not its true predecessor in time, which can create or miss a change. Late loads should be rare, and a full refresh replays everything in `observed_at` order and corrects it. Handling this at every run (look-back window + re-merge) is not worth the complexity here.
+> **As implemented** (`vault_window` macro): an incremental run reads staging rows with `ingested_at >= max(ingested_at)` of the table (`>=`, so the last processed snapshot is replayed, which closed detection needs), pruned with `observed_at >= max(observed_at) - 1 day`. The replayed rows are dropped by the hashdiff comparison against the latest row, so reruns are idempotent. The tables are partitioned on `observed_at`, not `loaded_at`; the unique key is `(hash key, observed_at)`.
+>
+> **Trade-offs accepted:**
+> - A late snapshot is compared against the latest satellite row, not its true predecessor in time, which can create or miss a change. Late loads should be rare, and a full refresh replays everything in `observed_at` order and corrects it.
+> - The watermark is the last row *written* (a satellite only gets rows on change), so a run reprocesses everything ingested since the last change of any station. Cheap today (second run on dev: 0 rows merged, about 2 MiB scanned); revisit with a snapshot ledger if it grows.
 
 ### How to run it
 
@@ -284,7 +367,7 @@ where hashdiff is distinct from coalesce(prev_hashdiff{% if is_incremental() %},
 
 Triggered from a `workflow_dispatch` GitHub Actions workflow in pbk-dbt (input: environment), which executes the Cloud Run Job with the same override the schedulers send. PRD requires approval through the GitHub environment protection rule.
 
-> **Proposal — not fixed.** The workflow below is a starting point. The way the job name reaches the runner (`--args` vs. env var), the input names, and the IAM roles will be adjusted once the dbt runner and schedulers are implemented.
+Implemented as `.github/workflows/full_refresh.yml` (below). The job name reaches the runner through `--args`, the same way the schedulers send it.
 
 ```yaml
 # .github/workflows/full_refresh.yml
@@ -370,36 +453,38 @@ CLI: `gh workflow run full_refresh.yml -f environment=dev -f select=stg_stations
 ## Repository Structure
 
 ```
-models/
-├── staging/
-│   ├── _sources.yml              # publibike_snapshots, log sink tables, forecasts, ml_model_runs
-│   └── stg_*.sql
-├── vault/
-│   ├── hub_stations.sql
-│   ├── hub_bikes.sql
-│   ├── lnk_station_bike.sql
-│   ├── sat_stations.sql
-│   ├── sat_bikes.sql
-│   └── sat_station_bike_eff.sql
-├── marts/
-│   ├── _exposures.yml
-│   ├── dim_stations.sql
-│   ├── dim_bikes.sql
-│   ├── fct_station_capacity.sql
-│   └── fct_trips.sql
-│
-├── ml/
-│   ├── station_capacity_features.sql
-│   ├── fct_forecasts.sql
-│   ├── fct_forecast_accuracy.sql
-│   └── fct_model_runs.sql
-│
-└── monitoring/
-    ├── mon_ingestion_freshness.sql
-    ├── mon_pipeline_runs.sql
-    └── mon_dbt_runs.sql
+dbt_project.yml  profiles.yml  data_product.yml  runner.py  Dockerfile
+pyproject.toml  uv.lock  Makefile  .envrc.example
+.github/workflows/        # pull_request_checks, cd, release, full_refresh, reusable_wf, deploy_wf
+tests/                    # pytest for the runner
+archive/                  # previous implementation, reference only
 
 macros/
+├── generate_schema_name.sql     # schema names used as-is (silver, gold)
+└── vault.sql                    # hash_key, hashdiff, vault_window
+
+models/
+├── staging/                     # done
+│   ├── _sources.yml             # bronze.publibike_snapshots (+ freshness)
+│   ├── _staging.yml
+│   ├── stg_snapshots.sql
+│   ├── stg_stations.sql
+│   └── stg_station_bikes.sql
+├── vault/                       # done
+│   ├── _vault.yml
+│   ├── hub_stations.sql  hub_bikes.sql  lnk_station_bike.sql
+│   └── sat_stations.sql  sat_bikes.sql  sat_station_bike_eff.sql
+├── marts/                       # planned
+│   ├── _exposures.yml
+│   ├── dim_stations.sql  dim_bikes.sql
+│   └── fct_station_capacity.sql  fct_trips.sql
+├── ml/                          # planned
+│   ├── station_capacity_features.sql
+│   ├── fct_forecasts.sql  fct_forecast_accuracy.sql  fct_model_runs.sql
+└── monitoring/                  # planned
+    └── mon_ingestion_freshness.sql  mon_pipeline_runs.sql  mon_dbt_runs.sql
+
+macros/ (planned)
 ├── train_station_capacity.sql
 └── predict_station_capacity.sql
 ```

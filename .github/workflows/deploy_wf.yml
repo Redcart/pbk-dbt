@@ -140,13 +140,18 @@ jobs:
         JOB=${{ env.PROJECT }}-${{ env.STREAM }}
         uv run --no-dev python runner.py schedules | while IFS=$'\t' read -r NAME CRON; do
           SCHEDULER=$JOB-$(echo "$NAME" | tr '_' '-')
-          ACTION=$(gcloud scheduler jobs describe $SCHEDULER --location ${{ env.GCP_REGION }} >/dev/null 2>&1 && echo update || echo create)
+          # `create` takes --headers, `update` takes --update-headers
+          if gcloud scheduler jobs describe $SCHEDULER --location ${{ env.GCP_REGION }} >/dev/null 2>&1; then
+            ACTION=update; HEADERS=--update-headers
+          else
+            ACTION=create; HEADERS=--headers
+          fi
           gcloud scheduler jobs $ACTION http $SCHEDULER \
             --location ${{ env.GCP_REGION }} \
             --schedule "$CRON" --time-zone "Etc/UTC" \
             --uri "https://run.googleapis.com/v2/projects/${{ env.GCP_PROJECT_ID }}/locations/${{ env.GCP_REGION }}/jobs/$JOB:run" \
             --http-method POST \
-            --headers "Content-Type=application/json" \
+            $HEADERS "Content-Type=application/json" \
             --message-body "{\"overrides\":{\"containerOverrides\":[{\"args\":[\"$NAME\"]}]}}" \
             --oauth-service-account-email ${{ env.SERVICE_ACCOUNT_RUNTIME }}
         done
