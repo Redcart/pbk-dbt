@@ -10,8 +10,8 @@
 |---|---|
 | Bronze → silver staging | Done: `stg_snapshots`, `stg_stations`, `stg_station_bikes` (views in `silver`), source freshness on `bronze.publibike_snapshots` |
 | Data Vault | Done: `hub_stations`, `hub_bikes`, `lnk_station_bike`, `sat_stations`, `sat_bikes`, `sat_station_bike_eff`, all incremental, with tests |
-| Gold | Not started (`dim_*`, `fct_station_capacity`, `fct_trips`) |
-| Runner | `runner.py` + `data_product.yml` (jobs `silver`, `full_refresh`), Docker image |
+| Gold | Done: `dim_stations`, `dim_bikes`, `fct_station_capacity` and `fct_trips` (tables in `gold`) |
+| Runner | `runner.py` + `data_product.yml` (jobs `refresh`, `full_refresh`), Docker image |
 | CI/CD | GitHub Actions: PR checks, CD (dev/stg), release (prd), manual full refresh |
 | ML, monitoring, Lightdash | Not started |
 
@@ -127,10 +127,10 @@ Orchestration works via Cloud Scheduler: **one scheduler per scheduled job** (ea
 # data_product.yml
 name: publibike
 jobs:
-  - name: silver              # every 5 minutes
+  - name: refresh             # every 5 minutes: vault + marts in DAG order
     schedule: "*/5 * * * *"
     command: build
-    args: ["--select", "vault"]
+    args: ["--select", "vault", "marts"]
   - name: full_refresh        # manual only
     schedule: null
     command: build
@@ -166,7 +166,7 @@ ci ──► image ──┬──► deploy-job          (gcloud run jobs deplo
 
 ## Lightdash Semantic Layer
 
-pbk-dbt owns what can be explored in Lightdash: the gold models and their dimensions/metrics, declared in the model YAML (`meta`). pbk-dash owns the server and the charts built on top (see *Who Pushes What to Lightdash* in `dashboard.md`).
+pbk-dbt owns what can be explored in Lightdash: the gold models and their dimensions/metrics, declared in the model YAML (`config.meta`). pbk-dash owns the server and the charts built on top (see *Who Pushes What to Lightdash* in `dashboard.md`).
 
 ```yaml
 # models/marts/_marts.yml
@@ -174,9 +174,10 @@ models:
   - name: fct_station_capacity
     columns:
       - name: bikes_available
-        meta:
-          metrics:
-            avg_bikes_available: { type: average }
+        config:
+          meta:
+            metrics:
+              avg_bikes_available: { type: average }
 ```
 
 **In CD** (dev, stg, and the prd release), after the runner image is deployed and new/changed models are built in BigQuery (Lightdash reads column types from the warehouse):
@@ -237,6 +238,19 @@ All entities are materialized as tables. Hubs need no partitioning nor clusterin
  INSERT       NOTHING            INSERT
  SAT          into SAT            SAT
 ```
+
+### Gold as implemented
+
+- **`dim_stations`** — latest `sat_stations` row per station, only `active` (the current network).
+- **`dim_bikes`** — every bike ever seen with its latest `bike_range`, `current_station_id` (null while rented) and `is_available`, from the latest `sat_station_bike_eff` rows.
+- **`fct_station_capacity`** — one row per station and snapshot: `bikes_available`, `electric_bikes_available`, `standard_bikes_available`. Incremental `merge` on `station_snapshot_hk`, partitioned on `observed_at`, clustered by `station_id`, same `vault_window` watermark as the satellites. Reads `stg_stations` directly (no vault dependency). Carries the Lightdash metrics (`avg_bikes_available`, `avg_electric_bikes_available`).
+- **`fct_trips`** — one row per completed trip: a bike's `closed` event at a station followed by its next `active` event at a station (`start_station_id`, `end_station_id`, `started_at`, `ended_at`, `duration_minutes`). Incremental `merge` on `trip_hk` (bike + departure time), partitioned on `started_at`, clustered by `start_station_id`, `bike_id`.
+  - **Accuracy** — times are snapshot times, so a trip is accurate to one snapshot (5 minutes). `started_at` is the first snapshot without the bike, `ended_at` the first one with it again; a bike that moves between two stations within one interval gets a 0-minute trip.
+  - **Not yet returned** — a bike still out is not a trip yet; it appears once it shows up at a station.
+  - **Lookback** — an incremental run looks back 7 days from the latest `ended_at` for the departure of a returning bike; a longer rental is only picked up by `full_refresh`.
+  - **Noise** — on dev (about 2 days): 31k trips, median duration 5 minutes, 9% at 0 minutes, 5% start and end at the same station. Short trips include bikes that briefly drop out of the feed; filtering them (for example `duration_minutes >= 5`) is a dashboard choice, not applied in the model.
+- **Lightdash metrics** are declared under `config.meta` (the top-level `meta` on columns is deprecated in dbt 1.12).
+- **Scheduling** — the single `refresh` job builds `vault` and `marts` together so dbt orders them by dependency; separate jobs would race on silver.
 
 ### Layer overview
 
@@ -474,10 +488,11 @@ models/
 │   ├── _vault.yml
 │   ├── hub_stations.sql  hub_bikes.sql  lnk_station_bike.sql
 │   └── sat_stations.sql  sat_bikes.sql  sat_station_bike_eff.sql
-├── marts/                       # planned
-│   ├── _exposures.yml
+├── marts/                       # done
+│   ├── _marts.yml               # tests + Lightdash metrics
 │   ├── dim_stations.sql  dim_bikes.sql
-│   └── fct_station_capacity.sql  fct_trips.sql
+│   ├── fct_station_capacity.sql
+│   └── fct_trips.sql
 ├── ml/                          # planned
 │   ├── station_capacity_features.sql
 │   ├── fct_forecasts.sql  fct_forecast_accuracy.sql  fct_model_runs.sql

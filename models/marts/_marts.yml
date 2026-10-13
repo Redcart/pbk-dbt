@@ -1,0 +1,46 @@
+version: 2
+
+models:
+  - name: dim_stations
+    description: Current network of active stations.
+    columns:
+      - name: station_id
+        data_tests: [unique, not_null]
+
+  - name: dim_bikes
+    description: Every bike ever seen, with its latest range and current station.
+    columns:
+      - name: bike_id
+        data_tests: [unique, not_null]
+
+  - name: fct_station_capacity
+    description: Bikes available per station and snapshot.
+    columns:
+      - name: station_snapshot_hk
+        data_tests: [unique, not_null]
+      - name: station_id
+        data_tests: [not_null]
+      - name: bikes_available
+        config:
+          meta:
+            metrics:
+              avg_bikes_available: { type: average }
+      - name: electric_bikes_available
+        config:
+          meta:
+            metrics:
+              avg_electric_bikes_available: { type: average }
+
+  - name: fct_trips
+    description: One row per completed trip (bike leaves a station, then shows up at a station). Times are accurate to one snapshot.
+    columns:
+      - name: trip_hk
+        data_tests: [unique, not_null]
+      - name: bike_id
+        data_tests: [not_null]
+      - name: duration_minutes
+        config:
+          meta:
+            metrics:
+              avg_trip_duration_minutes: { type: average }
+              trips: { type: count }

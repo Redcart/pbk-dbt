@@ -2,13 +2,14 @@ name: publibike
 
 jobs:
 
-  - name: silver
+  - name: refresh
     type: dbt_run
     schedule: "*/5 * * * *"
     command: build
     args:
       - "--select"
       - "vault"
+      - "marts"
 
   - name: full_refresh
     type: dbt_run
