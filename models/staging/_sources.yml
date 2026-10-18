@@ -19,3 +19,10 @@ sources:
             data_tests: [not_null]
           - name: ingested_at
             data_tests: [not_null]
+
+      - name: run_googleapis_com_stdout
+        description: Cloud Run stdout logs (pbk jobs and functions), written by the Cloud Logging sink. dbt logs are JSON in jsonPayload.
+      - name: run_googleapis_com_requests
+        description: Cloud Run request logs (the load function), written by the Cloud Logging sink.
+      - name: cloudaudit_googleapis_com_system_event
+        description: Cloud Run job execution events (completed, failed), written by the Cloud Logging sink.

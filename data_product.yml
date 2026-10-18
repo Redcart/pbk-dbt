@@ -10,6 +10,7 @@ jobs:
       - "--select"
       - "vault"
       - "marts"
+      - "monitoring"
 
   - name: full_refresh
     type: dbt_run

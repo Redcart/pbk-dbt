@@ -1,0 +1,53 @@
+version: 2
+
+models:
+  - name: mon_ingestion_freshness
+    description: One row per bronze snapshot, with its ingestion lag and the gap to the previous snapshot.
+    columns:
+      - name: snapshot_id
+        data_tests: [unique, not_null]
+      - name: ingestion_lag_seconds
+        config:
+          meta:
+            metrics:
+              avg_ingestion_lag_seconds: { type: average }
+              max_ingestion_lag_seconds: { type: max }
+      - name: missed_snapshots
+        config:
+          meta:
+            metrics:
+              total_missed_snapshots: { type: sum }
+      - name: minutes_since_previous_snapshot
+        config:
+          meta:
+            metrics:
+              max_gap_minutes: { type: max }
+
+  - name: mon_pipeline_runs
+    description: One row per Cloud Run job execution (extract, dbt) and per load function request.
+    columns:
+      - name: run_id
+        data_tests: [not_null]
+      - name: status
+        data_tests:
+          - accepted_values: { arguments: { values: [success, failure] } }
+        config:
+          meta:
+            metrics:
+              pipeline_runs: { type: count }
+
+  - name: mon_dbt_runs
+    description: One row per dbt model or test result of every dbt run.
+    columns:
+      - name: log_id
+        data_tests: [unique, not_null]
+      - name: is_failure
+        config:
+          meta:
+            metrics:
+              failed_nodes: { type: count, filters: [{ is_failure: true }] }
+      - name: execution_time_seconds
+        config:
+          meta:
+            metrics:
+              avg_node_seconds: { type: average }
