@@ -10,6 +10,12 @@ clean-targets:
   - target
   - dbt_packages
 
+# Names as they appear in Cloud Logging (the pipelines monitored through the log sink)
+vars:
+  cloud_run_functions: ['pbk-ingest-load']
+  dbt_job_name: 'pbk-dbt'
+  snapshot_interval_minutes: 5  # extract schedule (pbk-ingest), used to count missed snapshots
+
 models:
   pbk:
     staging: { +schema: silver, +materialized: view }

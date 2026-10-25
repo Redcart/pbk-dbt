@@ -18,3 +18,21 @@ models:
         data_tests: [not_null]
       - name: bike_id
         data_tests: [not_null]
+
+  - name: stg_dbt_log_events
+    description: dbt model and test results from dbt's JSON logs (may contain duplicate log_id, see model comment).
+    columns:
+      - name: log_id
+        data_tests: [not_null]
+
+  - name: stg_cloud_run_job_events
+    description: Result of every Cloud Run job execution (success or failure).
+    columns:
+      - name: execution_name
+        data_tests: [not_null]
+
+  - name: stg_cloud_run_function_events
+    description: One row per request received by the load function.
+    columns:
+      - name: log_id
+        data_tests: [not_null]

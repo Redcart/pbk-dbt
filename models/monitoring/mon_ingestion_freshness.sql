@@ -1,5 +1,5 @@
 -- One row per bronze snapshot: how late it landed and how long since the previous one.
--- Snapshots are expected every 5 minutes; a larger gap means missed snapshots.
+-- Snapshots are expected every `snapshot_interval_minutes`; a larger gap means missed snapshots.
 with snapshots as (
     select
         snapshot_id,
@@ -15,5 +15,5 @@ select
     ingested_at,
     timestamp_diff(ingested_at, observed_at, second) as ingestion_lag_seconds,
     minutes_since_previous_snapshot,
-    greatest(round(minutes_since_previous_snapshot / 5) - 1, 0) as missed_snapshots
+    greatest(round(minutes_since_previous_snapshot / {{ var('snapshot_interval_minutes') }}) - 1, 0) as missed_snapshots
 from snapshots

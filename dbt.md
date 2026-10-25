@@ -252,9 +252,10 @@ All entities are materialized as tables. Hubs need no partitioning nor clusterin
   - **Lookback** — an incremental run looks back 7 days from the latest `ended_at` for the departure of a returning bike; a longer rental is only picked up by `full_refresh`.
   - **Noise** — on dev (about 2 days): 31k trips, median duration 5 minutes, 9% at 0 minutes, 5% start and end at the same station. Short trips include bikes that briefly drop out of the feed; filtering them (for example `duration_minutes >= 5`) is a dashboard choice, not applied in the model.
 - **Lightdash metrics** are declared under `config.meta` (the top-level `meta` on columns is deprecated in dbt 1.12).
-- **`mon_ingestion_freshness`** (`models/monitoring`, table in `gold`) — one row per bronze snapshot: `ingestion_lag_seconds` (`ingested_at - observed_at`), `minutes_since_previous_snapshot` and `missed_snapshots` (gap / 5 minutes - 1). Built from `stg_snapshots`, so it never reads the JSON payload. Metrics: average and max lag, max gap, total missed snapshots. On dev: 288 snapshots a day, average lag about 26 s; the first day shows the gaps from before ingestion was stable.
-- **`mon_dbt_runs`** — one row per model or test result of every dbt run, from the JSON logs in `run_googleapis_com_stdout` (`jsonPayload.info.name` = `LogModelResult` / `LogTestResult`): `execution_name`, `invocation_id`, `node_type`, `node_name`, `status`, `is_failure`, `execution_time_seconds`, `message` (colors stripped). Incremental `merge` on the log `insertId` with a 1-hour lookback for late entries. Metrics: failed nodes, average node time.
-- **`mon_pipeline_runs`** — one row per Cloud Run job execution (`pbk-ingest-extract`, `pbk-dbt`; completion events in `cloudaudit_googleapis_com_system_event`, method `/Jobs.RunJob`) and per `pbk-ingest-load` request (`run_googleapis_com_requests`, success when HTTP < 400). Executions only appear once they have completed.
+- **`mon_ingestion_freshness`** (`models/monitoring`, table in `gold`) — one row per bronze snapshot: `ingestion_lag_seconds` (`ingested_at - observed_at`), `minutes_since_previous_snapshot` and `missed_snapshots` (gap / `snapshot_interval_minutes` - 1; the var is 5 and must follow the extract schedule in pbk-ingest). Built from `stg_snapshots`, so it never reads the JSON payload. Metrics: average and max lag, max gap, total missed snapshots. On dev: 288 snapshots a day, average lag about 26 s; the first day shows the gaps from before ingestion was stable.
+- **Staging for the log sink** — the `mon_*` models read three `stg_*` views, not the sink tables: `stg_dbt_log_events` (flattens dbt's JSON logs in `run_googleapis_com_stdout`, `jsonPayload.info.name` = `LogModelResult` / `LogTestResult`, strips colour codes), `stg_cloud_run_job_events` (job execution results from `system_event`), `stg_cloud_run_function_events` (load function requests). The monitored names are dbt vars in `dbt_project.yml` (`cloud_run_functions`, a list, and `dbt_job_name`), so renaming or adding a function is a one-line change. Dedupe on `insertId` is done in `mon_dbt_runs`, after its time filter, so the filter still prunes partitions.
+- **`mon_dbt_runs`** — one row per model or test result of every dbt run: `execution_name`, `invocation_id`, `node_type`, `node_name`, `status`, `is_failure`, `execution_time_seconds`, `message` (colors stripped). Incremental `merge` on the log `insertId` with a 1-hour lookback for late entries. Metrics: failed nodes, average node time.
+- **`mon_pipeline_runs`** — one row per Cloud Run job execution (`pbk-ingest-extract`, `pbk-dbt`) and per `pbk-ingest-load` request (success when HTTP < 400). In `stg_cloud_run_job_events`, only `completed successfully` and `failed to complete` events count: Cloud Run also logs `has been deleted` when it cleans up old executions, which is not a run result (it was inflating failures with thousands of false rows).
 - **Scheduling** — the single `refresh` job builds `vault`, `marts` and `monitoring` together so dbt orders them by dependency; separate jobs would race on silver.
 
 ### Layer overview
@@ -364,6 +365,8 @@ where hashdiff is distinct from coalesce(prev_hashdiff{% if is_incremental() %},
 > - **`observed_at` → change-detection ordering and partitioning.** A change is defined by the order snapshots were taken, not loaded; dashboards and forecasting filter on business time, so partition pruning uses it.
 >
 > **As implemented** (`vault_window` macro): an incremental run reads staging rows with `ingested_at >= max(ingested_at)` of the table (`>=`, so the last processed snapshot is replayed, which closed detection needs), pruned with `observed_at >= max(observed_at) - 1 day`. The replayed rows are dropped by the hashdiff comparison against the latest row, so reruns are idempotent. The tables are partitioned on `observed_at`, not `loaded_at`; the unique key is `(hash key, observed_at)`.
+>
+> **Run cutoff.** The window is also capped at `ingested_at <= run_started_at - 2 minutes`, the same for every model of an invocation. Models run in parallel and bronze keeps receiving snapshots, so without the cap a satellite could read a snapshot its link had not seen, and the `relationships` tests failed transiently (about 15% of runs on dev, found with `mon_dbt_runs`). The 2-minute margin covers the delay between a row's `ingested_at` and its visibility in BigQuery; rows past the cutoff are picked up by the next run.
 >
 > **Trade-offs accepted:**
 > - A late snapshot is compared against the latest satellite row, not its true predecessor in time, which can create or miss a change. Late loads should be rare, and a full refresh replays everything in `observed_at` order and corrects it.
@@ -488,7 +491,10 @@ models/
 │   ├── _staging.yml
 │   ├── stg_snapshots.sql
 │   ├── stg_stations.sql
-│   └── stg_station_bikes.sql
+│   ├── stg_station_bikes.sql
+│   ├── stg_dbt_log_events.sql            # log sink: dbt results
+│   ├── stg_cloud_run_job_events.sql      # log sink: job execution results
+│   └── stg_cloud_run_function_events.sql # log sink: load function requests
 ├── vault/                       # done
 │   ├── _vault.yml
 │   ├── hub_stations.sql  hub_bikes.sql  lnk_station_bike.sql
