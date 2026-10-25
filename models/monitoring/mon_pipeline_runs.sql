@@ -1,4 +1,4 @@
--- One row per pipeline run: 
+-- One row per pipeline run:
 -- Cloud Run Job executions (extract, dbt)
 -- Load Cloud Run function requests
 with cloud_run_job_executions as (
