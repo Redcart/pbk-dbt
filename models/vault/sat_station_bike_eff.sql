@@ -18,6 +18,17 @@ with snapshots as (
     where {{ vault_window() }}
 ),
 
+station_bikes as (
+    select
+        snapshot_id,
+        station_id,
+        bike_id,
+        observed_at,
+        ingested_at
+    from {{ ref('stg_station_bikes') }}
+    where {{ vault_window() }}
+),
+
 present as (
     select
         {{ hash_key(['station_id', 'bike_id']) }} as station_bike_hk,
@@ -26,8 +37,7 @@ present as (
         observed_at,
         ingested_at,
         'active' as status
-    from {{ ref('stg_station_bikes') }}
-    where {{ vault_window() }}
+    from ({{ one_station_per_bike('station_bikes') }})
 ),
 
 closed as (

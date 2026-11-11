@@ -7,7 +7,19 @@
     cluster_by=['bike_hk'],
 ) }}
 
-with src as (
+with station_bikes as (
+    select
+        snapshot_id,
+        station_id,
+        bike_id,
+        observed_at,
+        ingested_at,
+        bike_range
+    from {{ ref('stg_station_bikes') }}
+    where {{ vault_window() }}
+),
+
+src as (
     select
         {{ hash_key(['bike_id']) }} as bike_hk,
         bike_id,
@@ -15,9 +27,7 @@ with src as (
         ingested_at,
         bike_range,
         {{ hashdiff(['bike_range']) }} as hashdiff
-    from {{ ref('stg_station_bikes') }}
-    where {{ vault_window() }}
-    qualify row_number() over (partition by bike_id, snapshot_id order by station_id) = 1
+    from ({{ one_station_per_bike('station_bikes') }})
 ),
 
 changes as (
