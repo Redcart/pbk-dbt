@@ -222,6 +222,7 @@ All entities are materialized as tables. Hubs need no partitioning nor clusterin
 - **`sat_bikes`** — `bike_range` over time. No status: a bike absent from the feed is simply rented, not closed.
 - **`sat_station_bike_eff`** — effectivity of the link: `active` when a bike shows up at a station, `closed` when it is gone from that station in the next snapshot. Basis for `fct_trips`.
 - **Closed detection** — a station (or station-bike pair) present in a snapshot but absent from the next one gets a `closed` row stamped with the next snapshot's time; a reappearance is a new `active` row. Snapshot order comes from `stg_snapshots`, which reads only the metadata columns, never the payload.
+- **One station per bike and snapshot** — the Publibike feed sometimes lists the same bike at two stations in one snapshot (12 cases on dev from 2026-10-12 to 2026-11-10, always 2 stations, 1 in 700 snapshots or so; checked in the raw `data.json` in GCS for 2026-11-10 16:40: stations 1.6 km apart, so it is the API, not a bike moving during the extract). It broke `unique_dim_bikes_bike_id` 8 times (the test only exists since 2026-10-13), each time for one run. The `one_station_per_bike` macro (`macros/vault.sql`) keeps the station where the bike was last seen, ties go to the lowest `station_id`; it is applied in `sat_station_bike_eff` and `sat_bikes` after `vault_window`, never in a view (a window function there would read every payload). The hubs and the link still record both stations: the bike was listed there. `dim_bikes` and `fct_trips` follow from `sat_station_bike_eff`.
 
 **Station feed → satellite insert logic:**
 ```
@@ -469,6 +470,21 @@ CLI: `gh workflow run full_refresh.yml -f environment=dev -f select=stg_stations
 4. Retrain the BQML model if the field feeds the features.
 
 **No need to pause schedulers:** BigQuery `CREATE OR REPLACE TABLE` swaps atomically, and the watermark logic makes the next 5-minute run pick up from wherever the rebuilt table ends.
+
+### Backups kept on dev (2026-11-11)
+
+Before the full refresh that applied `one_station_per_bike` (see *One station per bike and snapshot*), two BigQuery snapshot tables were taken in `pbk-dev-bda8.silver`, copies of the satellites as they were before the change:
+
+| Snapshot table | Copy of |
+|---|---|
+| `sat_bikes_bak_20261111` | `sat_bikes` |
+| `sat_station_bike_eff_bak_20261111` | `sat_station_bike_eff` |
+
+- **Why:** the satellites are rebuildable from bronze, but the rebuild changes rows (10 new and 14 removed rows in `sat_station_bike_eff`, none in `sat_bikes`); the copies let us diff or roll back without replaying anything.
+- **Expiry:** created with `expiration_timestamp` = creation + 14 days, so BigQuery deletes them **on 2026-11-25** on its own. Nothing to do.
+- **Delete earlier:** once dev has run a few days after the change with no `unique_dim_bikes_bike_id` or `relationships_sat_*` failure in `mon_dbt_runs`: `bq rm -t pbk-dev-bda8:silver.sat_bikes_bak_20261111` (same for the other).
+- **Roll back:** `create or replace table silver.sat_station_bike_eff clone silver.sat_station_bike_eff_bak_20261111` (same for `sat_bikes`), then revert the commit, or the next run will apply the new rule again.
+- **stg and prd:** no backup needed, the satellites are built with the new rule from the start (full refresh from bronze after the first deploy).
 
 ---
 
