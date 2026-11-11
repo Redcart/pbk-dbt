@@ -488,6 +488,62 @@ Before the full refresh that applied `one_station_per_bike` (see *One station pe
 
 ---
 
+## Promoting to stg and prd
+
+Silver and gold are never copied between environments: they are rebuilt from bronze. Only the **bronze history** is carried over from dev, so a new environment starts with the same past (dev has data since 2026-10-11) instead of from its deploy day.
+
+### Code promotion
+
+- **dev → stg:** `stg` only checks that the image of the same commit SHA exists (see *CI/CD*), so the SHA must not change: fast-forward, `git push origin dev:stg`. A merge commit or a squash creates a new SHA and the check fails.
+- **stg → prd:** tag a commit already deployed on stg, `git tag vX.Y.Z <sha> && git push origin vX.Y.Z` (`release.yml`).
+- **Prerequisites** (pbk-infra): the project, the `bronze`/`silver`/`gold` datasets, the service accounts and their roles, the Cloud Logging sink to `bronze`, the raw bucket and the pbk-ingest functions. Names follow dev: scheduler `pbk-dbt-refresh` and `pbk-ingest-extract` in `europe-west6`, bucket `pbk-raw-<env>` (to confirm for stg and prd). Lightdash: `lightdash deploy --create` once per environment.
+
+### First deploy of an environment (stg, then prd)
+
+| # | Step | Command / check |
+|---|---|---|
+| 1 | Deploy (push to `stg`, or the `v*.*.*` tag). The schedulers are created **enabled**: pause the dbt one right away. pbk-ingest keeps running, so bronze keeps filling. | `gcloud scheduler jobs pause pbk-dbt-refresh --location europe-west6 --project <project>` |
+| 2 | Copy the bronze past from dev, **only what the target does not have**. | see below |
+| 3 | Check the copy: row count, `min`/`max(observed_at)`, no duplicated `snapshot_id`, no gap other than the known ones. | `bq query` on `bronze.publibike_snapshots` |
+| 4 | Full refresh (`prd` asks for approval). | `gh workflow run full_refresh.yml -f environment=<env>` |
+| 5 | Validate: every test passes, `dbt source freshness`, hub counts consistent with bronze, `mon_pipeline_runs` shows the extract, load and dbt runs. | |
+| 6 | Resume the scheduler, then check that the next 5-minute run succeeded. | `gcloud scheduler jobs resume pbk-dbt-refresh ...`, then `mon_dbt_runs` |
+
+**Why the dbt scheduler is paused:** not to avoid concurrent writes (a rebuild is an atomic `CREATE OR REPLACE`, see *Full Refresh*), but so that no run advances the watermarks on a half-filled bronze before the copy. If a run slips through before the pause, the full refresh rebuilds everything anyway.
+
+**Step 2, what is copied and what is not:**
+
+- **BigQuery `bronze.publibike_snapshots`**: rows older than the first snapshot of the target. The filter on `observed_at` and the `snapshot_id` guard keep the junction free of duplicates and of holes, because the runs that arrive meanwhile land directly in the target.
+
+```sql
+insert into `<target-project>.bronze.publibike_snapshots`
+select * from `pbk-dev-bda8.bronze.publibike_snapshots`
+where observed_at < (select min(observed_at) from `<target-project>.bronze.publibike_snapshots`)
+  and snapshot_id not in (select snapshot_id from `<target-project>.bronze.publibike_snapshots`)
+```
+
+  The schema (columns, partitioning) must match, and there must be no partition expiration on the target.
+- **GCS raw files** (`gs://pbk-raw-dev/stations/raw_data/<date>/<HH:MM:SS>/{data.json,raw.jsonl}`): `gcloud storage rsync -r gs://pbk-raw-dev/stations/raw_data gs://pbk-raw-<env>/stations/raw_data --no-clobber`. This does **not** reload anything into BigQuery: on dev the bucket has no notification and `pbk-ingest-load` is triggered by the Pub/Sub topic `pbk-load` (Eventarc `messagePublished`), which the extract publishes to. So the GCS copy only restores the raw files, and the BigQuery history comes from the insert above, not from the files.
+- **Not copied:** the Cloud Logging sink tables (`run_googleapis_com_*`, `cloudaudit_*`): monitoring in stg and prd must show their own runs. `silver` and `gold`: rebuilt.
+
+**First full refresh of a fresh environment:** the `mon_*` models need the sink tables, which only exist after the first log entries (see *Sources*). The first full refresh can fail on `mon_*` only; rerun it once the sink tables exist. Everything else is built.
+
+### Where to run a full refresh
+
+| Environment | How | Why |
+|---|---|---|
+| dev | From the Mac: `GCP_PROJECT_ID=pbk-dev-bda8 uv run dbt build --full-refresh [--select ...] --profiles-dir .` | Fast iterations and selectors. |
+| stg | From the Mac if you have the rights on the project, after checking that `git rev-parse HEAD` is the SHA deployed on stg; otherwise the workflow. | The local checkout can differ from the deployed image. |
+| prd | The `full_refresh.yml` workflow only. | Keeps the GitHub environment approval and the trace in Actions and Cloud Run, and runs the deployed image as the runtime service account. |
+
+From the Mac, set `GCP_PROJECT_ID` to the target project; the daily user cannot run BigQuery jobs, so `DBT_IMPERSONATE_SERVICE_ACCOUNT` is needed (see *Local Development*; documented for dev only).
+
+### Later full refreshes in prd
+
+Take a BigQuery snapshot of the tables about to be rebuilt first, same as the dev backups (time travel covers 7 days, a snapshot table lasts as long as you set), then run `full_refresh.yml` with a selector.
+
+---
+
 ## Repository Structure
 
 ```
