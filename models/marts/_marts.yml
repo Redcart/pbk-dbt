@@ -6,20 +6,35 @@ models:
     columns:
       - name: station_id
         data_tests: [unique, not_null]
+      - name: station_number
+      - name: station_name
+      - name: station_address
+      - name: latitude
+      - name: longitude
+      - name: details_route
+      - name: first_seen_at
+      - name: last_changed_at
 
   - name: dim_bikes
     description: Every bike ever seen, with its latest range and current station.
     columns:
       - name: bike_id
         data_tests: [unique, not_null]
+      - name: bike_range
+      - name: current_station_id
+      - name: is_available
+      - name: first_seen_at
 
   - name: fct_station_capacity
     description: Bikes available per station and snapshot.
     columns:
       - name: station_snapshot_hk
         data_tests: [unique, not_null]
+      - name: snapshot_id
       - name: station_id
         data_tests: [not_null]
+      - name: observed_at
+      - name: ingested_at
       - name: bikes_available
         config:
           meta:
@@ -30,6 +45,7 @@ models:
           meta:
             metrics:
               avg_electric_bikes_available: { type: average }
+      - name: standard_bikes_available
 
   - name: fct_trips
     description: One row per completed trip (bike leaves a station, then shows up at a station). Times are accurate to one snapshot.
@@ -38,6 +54,11 @@ models:
         data_tests: [unique, not_null]
       - name: bike_id
         data_tests: [not_null]
+      - name: start_station_id
+      - name: end_station_id
+      - name: started_at
+      - name: ended_at
+      - name: ingested_at
       - name: duration_minutes
         config:
           meta:
