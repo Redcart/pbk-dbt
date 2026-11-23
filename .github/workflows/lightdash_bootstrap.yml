@@ -1,21 +1,16 @@
 name: Lightdash bootstrap
 
-# One-off, per environment: creates the Lightdash project from this dbt project
-# (`lightdash deploy --create`). Run it once after Lightdash is up and the personal
-# access token is stored in Secret Manager (lightdash-api-key); then copy the project UUID
-# from the logs into LIGHTDASH_PROJECT_UUID (pbk-variables). Later deploys run in CD.
+# TEMPORARY, dev only: creates the Lightdash project from this dbt project
+# (`lightdash deploy --create`). It runs when this file is pushed to dev. Delete the file once the
+# project exists, and copy the project UUID from the logs into LIGHTDASH_PROJECT_UUID (pbk-variables).
+# Running it twice would create a second project. Later deploys run in CD.
 #
 # Reaches Lightdash through the load balancer + IAP: an ID token of the CI/CD service account
 # (audience = the IAP backend service) goes in Proxy-Authorization, the Lightdash token in Authorization.
 on:
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Environment to create the Lightdash project in'
-        required: true
-        type: choice
-        options: [dev, stg, prd]
-        default: dev
+  push:
+    branches: ["dev"]
+    paths: [".github/workflows/lightdash_bootstrap.yml"]
 
 env:
   WIF_POOL_ID: ${{ vars.WIF_POOL_ID }}
@@ -23,7 +18,7 @@ env:
 
 jobs:
   create-project:
-    environment: ${{ inputs.environment }}
+    environment: dev
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -74,6 +69,6 @@ jobs:
         LIGHTDASH_PROXY_AUTHORIZATION: Bearer ${{ steps.iap.outputs.id_token }}
         GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
       run: |
-        uv run --no-dev npx --yes @lightdash/cli@3.237.0 deploy --create "pbk ${{ inputs.environment }}" \
-          --project-dir . --profiles-dir . --target ${{ inputs.environment }} \
+        uv run --no-dev npx --yes @lightdash/cli@3.237.0 deploy --create "pbk dev" \
+          --project-dir . --profiles-dir . --target dev \
           --select "path:models/marts path:models/monitoring"
