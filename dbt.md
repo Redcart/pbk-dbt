@@ -123,14 +123,14 @@ The dbt project is packaged as a Docker image, pushed to Artifact Registry via G
 
 **Python 3.14** (platform standard) with **dbt-core 1.12** (`>=1.12,<1.13`) and dbt-bigquery 1.12. Validated on 3.14 (dbt runs, tests pass); the only fix needed is the `mashumaro` pin described in *Local Development*.
 
-Orchestration works via Cloud Scheduler: **one scheduler per scheduled job** (each job has its own cron, and a scheduler has only one), all triggering the same Cloud Run Job `pbk-dbt`. `data_product.yml` declares the runs the image can perform, so a single image serves every schedule.
+Orchestration works via Cloud Scheduler (`refresh` every 15 minutes, a cost choice: ingestion still collects every 5 minutes and models replay from the last processed snapshot, so nothing is lost): **one scheduler per scheduled job** (each job has its own cron, and a scheduler has only one), all triggering the same Cloud Run Job `pbk-dbt`. `data_product.yml` declares the runs the image can perform, so a single image serves every schedule.
 
 ```yaml
 # data_product.yml
 name: publibike
 jobs:
-  - name: refresh             # every 5 minutes: vault + marts in DAG order
-    schedule: "*/5 * * * *"
+  - name: refresh             # every 15 minutes: vault + marts in DAG order
+    schedule: "*/15 * * * *"
     command: build
     args: ["--select", "vault", "marts"]
   - name: full_refresh        # manual only
@@ -217,6 +217,7 @@ All entities are materialized as tables. Hubs need no partitioning nor clusterin
 
 **As implemented:**
 - **Keys** — hash key = `md5` of the business key(s) joined by `|` (`hash_key` macro); `hashdiff` = `md5` of the JSON of the descriptive columns plus `status` (`hashdiff` macro).
+- **Hub window** — hubs read only the last `hub_lookback_hours` (var, default 2) of bronze on incremental runs (`hub_window` macro), not the `vault_window` watermark: a hub's own max timestamps only move when a new key appears, so the watermark re-read weeks of JSON payload every run (about 55% of the BigQuery bill on dev). A full refresh covers the history.
 - **Hubs and link** — incremental `merge` on the hash key (BigQuery has no `append` strategy); only keys not yet in the table are selected, so the merge only inserts. Columns: hash key(s), business key(s), `first_seen_at`, `ingested_at`, `record_source`.
 - **`sat_stations`** — descriptive attributes (number, name, address, latitude, longitude, details route) and `status`. Bike counts change every snapshot and belong to `fct_station_capacity`, not to this satellite.
 - **`sat_bikes`** — `bike_range` over time. No status: a bike absent from the feed is simply rented, not closed.

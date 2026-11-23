@@ -20,6 +20,17 @@
     {%- endif -%}
 {%- endmacro %}
 
+{# Rows to (re)process for a hub. A hub's own max timestamps only move when a new key appears (weeks apart), so the
+   `vault_window` watermark would re-read weeks of payload on every run. Incremental runs instead read the last
+   `hub_lookback_hours` of bronze (dbt var, default 2): enough to see any key that is new, since a key present now is in
+   the latest snapshot. A full refresh covers the whole history. #}
+{% macro hub_window() -%}
+    ingested_at <= timestamp('{{ (run_started_at - modules.datetime.timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S") }}')
+    {%- if is_incremental() %}
+        and observed_at >= timestamp('{{ (run_started_at - modules.datetime.timedelta(hours=var("hub_lookback_hours", 2))).strftime("%Y-%m-%d %H:%M:%S") }}')
+    {%- endif -%}
+{%- endmacro %}
+
 {# One station per bike and snapshot. The API can list a bike at several stations in the same snapshot (always 2 so far,
    about once every 700 snapshots on dev): the bike stays where it was last seen, ties (new bike, or no listed station is
    the previous one) go to the lowest station_id.

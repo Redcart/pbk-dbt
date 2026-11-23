@@ -12,7 +12,7 @@ select
     min(ingested_at) as ingested_at,
     'publibike' as record_source
 from {{ ref('stg_stations') }}
-where {{ vault_window('first_seen_at') }}
+where {{ hub_window() }}
 group by station_hk, station_id
 {% if is_incremental() %}
 having station_hk not in (select station_hk from {{ this }})
