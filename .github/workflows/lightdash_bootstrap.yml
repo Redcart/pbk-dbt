@@ -62,6 +62,31 @@ jobs:
         echo "::add-mask::$TOKEN"
         echo "LIGHTDASH_API_KEY=$TOKEN" >> "$GITHUB_ENV"
 
+    # Diagnostics (no secrets printed): is the IAP token present, what are its claims, what does IAP answer?
+    - name: Check the IAP token
+      env:
+        IAP_TOKEN: ${{ steps.iap.outputs.id_token }}
+        LIGHTDASH_URL: ${{ vars.LIGHTDASH_URL }}
+      run: |
+        echo "token length: ${#IAP_TOKEN}"
+        python3 - <<'PY'
+        import base64, json, os
+        t = os.environ["IAP_TOKEN"].split(".")
+        if len(t) == 3:
+            c = json.loads(base64.urlsafe_b64decode(t[1] + "=" * (-len(t[1]) % 4)))
+            print({k: c.get(k) for k in ("aud", "email", "iss", "exp")})
+        else:
+            print("not a JWT")
+        PY
+        for h in "none" "Proxy-Authorization" "Authorization"; do
+          if [ "$h" = none ]; then
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$LIGHTDASH_URL/api/v1/health")
+          else
+            code=$(curl -s -o /dev/null -w '%{http_code}' -H "$h: Bearer $IAP_TOKEN" "$LIGHTDASH_URL/api/v1/health")
+          fi
+          echo "GET /api/v1/health with $h -> HTTP $code"
+        done
+
     # Only the gold models: the Lightdash identity (and this service account) read gold, not silver
     - name: Create the Lightdash project
       env:
