@@ -155,3 +155,70 @@ jobs:
             --message-body "{\"overrides\":{\"containerOverrides\":[{\"args\":[\"$NAME\"]}]}}" \
             --oauth-service-account-email ${{ env.SERVICE_ACCOUNT_RUNTIME }}
         done
+
+  deploy-lightdash:
+    # Publish the dbt models to Lightdash (through the load balancer + IAP). Skipped while the
+    # environment has no Lightdash project (LIGHTDASH_PROJECT_UUID unset).
+    # An ID token of the CI/CD service account, audience = the IAP OAuth client ID, goes in
+    # Proxy-Authorization; the Lightdash API token in Authorization.
+    if: ${{ vars.LIGHTDASH_PROJECT_UUID != '' }}
+    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    needs: image
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
+      SERVICE_ACCOUNT_GH: ${{ vars.SERVICE_ACCOUNT_GH }}
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - uses: astral-sh/setup-uv@v10.3.0
+      with:
+        version: ${{ vars.UV_VERSION }}
+
+    - run: make install
+
+    # Application Default Credentials for dbt (oauth) and Secret Manager
+    - uses: google-github-actions/auth@v3
+      with:
+        workload_identity_provider: 'projects/${{ env.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ env.WIF_POOL_ID }}/providers/${{ env.WIF_POOL_PROVIDER }}'
+        service_account: ${{ env.SERVICE_ACCOUNT_GH }}
+
+    - uses: google-github-actions/setup-gcloud@v3
+
+    - name: Read the IAP OAuth client ID
+      id: iap_client
+      run: |
+        echo "id=$(gcloud secrets versions access latest --secret=lightdash-iap-client-id --project=${{ env.GCP_PROJECT_ID }})" >> "$GITHUB_OUTPUT"
+
+    # Same service account, ID token for IAP
+    - uses: google-github-actions/auth@v3
+      id: iap
+      with:
+        workload_identity_provider: 'projects/${{ env.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ env.WIF_POOL_ID }}/providers/${{ env.WIF_POOL_PROVIDER }}'
+        service_account: ${{ env.SERVICE_ACCOUNT_GH }}
+        token_format: id_token
+        id_token_audience: ${{ steps.iap_client.outputs.id }}
+        id_token_include_email: true
+        create_credentials_file: false
+
+    - name: Read the Lightdash token
+      run: |
+        TOKEN=$(gcloud secrets versions access latest --secret=lightdash-api-key --project=${{ env.GCP_PROJECT_ID }})
+        echo "::add-mask::$TOKEN"
+        echo "LIGHTDASH_API_KEY=$TOKEN" >> "$GITHUB_ENV"
+
+    # Only the gold models: the Lightdash identity (and this service account) read gold, not silver
+    - name: Deploy to Lightdash
+      env:
+        LIGHTDASH_URL: ${{ vars.LIGHTDASH_URL }}
+        LIGHTDASH_PROJECT: ${{ vars.LIGHTDASH_PROJECT_UUID }}
+        LIGHTDASH_PROXY_AUTHORIZATION: Bearer ${{ steps.iap.outputs.id_token }}
+      run: |
+        uv run --no-dev npx --yes @lightdash/cli@3.237.0 deploy \
+          --project-dir . --profiles-dir . --target ${{ inputs.environment }} \
+          --select "path:models/marts path:models/monitoring"
