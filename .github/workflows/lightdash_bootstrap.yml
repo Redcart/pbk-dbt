@@ -6,7 +6,7 @@ name: Lightdash bootstrap
 # Running it twice would create a second project. Later deploys run in CD.
 #
 # Reaches Lightdash through the load balancer + IAP: an ID token of the CI/CD service account
-# (audience = the IAP backend service) goes in Proxy-Authorization, the Lightdash token in Authorization.
+# (audience = the IAP OAuth client ID, from Secret Manager) goes in Proxy-Authorization, the Lightdash token in Authorization.
 on:
   push:
     branches: ["dev"]
@@ -45,6 +45,12 @@ jobs:
 
     - uses: google-github-actions/setup-gcloud@v3
 
+    # IAP on the load balancer only accepts ID tokens whose audience is its OAuth client ID
+    - name: Read the IAP OAuth client ID
+      id: iap_client
+      run: |
+        echo "id=$(gcloud secrets versions access latest --secret=lightdash-iap-client-id --project=${{ env.GCP_PROJECT_ID }})" >> "$GITHUB_OUTPUT"
+
     # Same service account, ID token for IAP
     - uses: google-github-actions/auth@v3
       id: iap
@@ -52,7 +58,7 @@ jobs:
         workload_identity_provider: 'projects/${{ env.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ env.WIF_POOL_ID }}/providers/${{ env.WIF_POOL_PROVIDER }}'
         service_account: ${{ env.SERVICE_ACCOUNT_GH }}
         token_format: id_token
-        id_token_audience: ${{ vars.LIGHTDASH_IAP_AUDIENCE }}
+        id_token_audience: ${{ steps.iap_client.outputs.id }}
         id_token_include_email: true
         create_credentials_file: false
 
