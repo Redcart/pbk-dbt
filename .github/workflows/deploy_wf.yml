@@ -158,10 +158,10 @@ jobs:
 
   deploy-lightdash:
     # Publish the dbt models to Lightdash (through the load balancer + IAP). Skipped while the
-    # environment has no Lightdash project (LIGHTDASH_PROJECT_UUID unset).
+    # environment has no Lightdash project (LIGHTDASH_PROJECT_UUID unset); the check is a step
+    # because environment variables are not visible to a job-level `if`.
     # An ID token of the CI/CD service account, audience = the IAP OAuth client ID, goes in
     # Proxy-Authorization; the Lightdash API token in Authorization.
-    if: ${{ vars.LIGHTDASH_PROJECT_UUID != '' }}
     environment: ${{ inputs.environment }}
     runs-on: ubuntu-latest
     permissions:
@@ -174,29 +174,40 @@ jobs:
       SERVICE_ACCOUNT_GH: ${{ vars.SERVICE_ACCOUNT_GH }}
 
     steps:
+    - name: Lightdash project configured?
+      id: gate
+      run: echo "run=${{ vars.LIGHTDASH_PROJECT_UUID != '' }}" >> "$GITHUB_OUTPUT"
+
     - uses: actions/checkout@v7
+      if: steps.gate.outputs.run == 'true'
 
     - uses: astral-sh/setup-uv@v10.3.0
+      if: steps.gate.outputs.run == 'true'
       with:
         version: ${{ vars.UV_VERSION }}
 
     - run: make install
+      if: steps.gate.outputs.run == 'true'
 
     # Application Default Credentials for dbt (oauth) and Secret Manager
     - uses: google-github-actions/auth@v3
+      if: steps.gate.outputs.run == 'true'
       with:
         workload_identity_provider: 'projects/${{ env.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ env.WIF_POOL_ID }}/providers/${{ env.WIF_POOL_PROVIDER }}'
         service_account: ${{ env.SERVICE_ACCOUNT_GH }}
 
     - uses: google-github-actions/setup-gcloud@v3
+      if: steps.gate.outputs.run == 'true'
 
     - name: Read the IAP OAuth client ID
+      if: steps.gate.outputs.run == 'true'
       id: iap_client
       run: |
         echo "id=$(gcloud secrets versions access latest --secret=lightdash-iap-client-id --project=${{ env.GCP_PROJECT_ID }})" >> "$GITHUB_OUTPUT"
 
     # Same service account, ID token for IAP
     - uses: google-github-actions/auth@v3
+      if: steps.gate.outputs.run == 'true'
       id: iap
       with:
         workload_identity_provider: 'projects/${{ env.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ env.WIF_POOL_ID }}/providers/${{ env.WIF_POOL_PROVIDER }}'
@@ -207,6 +218,7 @@ jobs:
         create_credentials_file: false
 
     - name: Read the Lightdash token
+      if: steps.gate.outputs.run == 'true'
       run: |
         TOKEN=$(gcloud secrets versions access latest --secret=lightdash-api-key --project=${{ env.GCP_PROJECT_ID }})
         echo "::add-mask::$TOKEN"
@@ -214,6 +226,7 @@ jobs:
 
     # Only the gold models: the Lightdash identity (and this service account) read gold, not silver
     - name: Deploy to Lightdash
+      if: steps.gate.outputs.run == 'true'
       env:
         LIGHTDASH_URL: ${{ vars.LIGHTDASH_URL }}
         LIGHTDASH_PROJECT: ${{ vars.LIGHTDASH_PROJECT_UUID }}
