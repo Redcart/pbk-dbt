@@ -7,3 +7,6 @@ target/
 dbt_packages/
 logs/
 .user.yml
+
+# Local Claude context (shared docs live in ../pbk-project)
+CLAUDE.md
