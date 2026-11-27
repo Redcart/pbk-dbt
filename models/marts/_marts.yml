@@ -40,6 +40,10 @@ models:
       - name: station_id
         data_tests: [not_null]
       - name: observed_at
+        config:
+          meta:
+            dimension:
+              time_intervals: [HOUR, DAY, WEEK, MONTH]
       - name: ingested_at
       - name: bikes_available
         config:
@@ -67,6 +71,10 @@ models:
       - name: start_station_id
       - name: end_station_id
       - name: started_at
+        config:
+          meta:
+            dimension:
+              time_intervals: [HOUR, DAY, WEEK, MONTH]
       - name: ended_at
       - name: ingested_at
       - name: duration_minutes
