@@ -27,6 +27,12 @@ models:
 
   - name: fct_station_capacity
     description: Bikes available per station and snapshot.
+    config:
+      meta:
+        joins:
+          - join: dim_stations
+            sql_on: ${fct_station_capacity.station_id} = ${dim_stations.station_id}
+            relationship: many-to-one
     columns:
       - name: station_snapshot_hk
         data_tests: [unique, not_null]
@@ -46,6 +52,10 @@ models:
             metrics:
               avg_electric_bikes_available: { type: average }
       - name: standard_bikes_available
+        config:
+          meta:
+            metrics:
+              avg_standard_bikes_available: { type: average }
 
   - name: fct_trips
     description: One row per completed trip (bike leaves a station, then shows up at a station). Times are accurate to one snapshot.
