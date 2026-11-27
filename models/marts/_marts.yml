@@ -6,6 +6,10 @@ models:
     columns:
       - name: station_id
         data_tests: [unique, not_null]
+        config:
+          meta:
+            metrics:
+              stations: { type: count_distinct }
       - name: station_number
       - name: station_name
       - name: station_address
@@ -20,7 +24,16 @@ models:
     columns:
       - name: bike_id
         data_tests: [unique, not_null]
+        config:
+          meta:
+            metrics:
+              available_bikes: { type: count_distinct, filters: [{ is_available: 'true' }] }
       - name: bike_range
+        config:
+          meta:
+            metrics:
+              available_electric_bikes: { type: count_distinct, sql: '${TABLE}.bike_id', filters: [{ is_available: 'true' }, { bike_range: '!null' }] }
+              available_standard_bikes: { type: count_distinct, sql: '${TABLE}.bike_id', filters: [{ is_available: 'true' }, { bike_range: 'null' }] }
       - name: current_station_id
       - name: is_available
       - name: first_seen_at
